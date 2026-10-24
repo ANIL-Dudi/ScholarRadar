@@ -1,27 +1,72 @@
+
+import logging
 import os
 import smtplib
 from email.message import EmailMessage
+
 import httpx
 
-
-def send_telegram(text: str):
-    tok, chat = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
-    if tok and chat:
-        httpx.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id": chat, "text": text})
+logger = logging.getLogger(__name__)
 
 
-def send_email(subject: str, body: str):
-    host, user, pw, to = (os.getenv(k) for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS", "ALERT_TO"))
-    if not (host and user and pw and to):
-        return
-    m = EmailMessage()
-    m["From"], m["To"], m["Subject"] = user, to, subject
-    m.set_content(body)
-    with smtplib.SMTP_SSL(host, 465) as s:
-        s.login(user, pw)
-        s.send_message(m)
+def send_telegram(text: str) -> bool:
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+    if not token or not chat_id:
+        logger.info("Telegram notifications are not configured.")
+        return False
+
+    try:
+        response = httpx.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=15,
+        )
+        response.raise_for_status()
+
+        result = response.json()
+        if not result.get("ok"):
+            logger.error("Telegram API rejected the notification.")
+            return False
+
+        return True
+
+    except (httpx.HTTPError, ValueError):
+        logger.exception("Failed to send Telegram notification.")
+        return False
 
 
-def notify(subject: str, body: str):
-    send_telegram(f"{subject}\n{body}")
-    send_email(subject, body)
+def send_email(subject: str, body: str) -> bool:
+    host, user, password, recipient = (
+        os.getenv(key)
+        for key in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS", "ALERT_TO")
+    )
+
+    if not all((host, user, password, recipient)):
+        logger.info("Email notifications are not configured.")
+        return False
+
+    message = EmailMessage()
+    message["From"] = user
+    message["To"] = recipient
+    message["Subject"] = subject
+    message.set_content(body)
+
+    try:
+        with smtplib.SMTP_SSL(host, 465, timeout=20) as server:
+            server.login(user, password)
+            server.send_message(message)
+
+        return True
+
+    except (OSError, smtplib.SMTPException):
+        logger.exception("Failed to send email notification.")
+        return False
+
+
+def notify(subject: str, body: str) -> dict:
+    return {
+        "telegram": send_telegram(f"{subject}\n{body}"),
+        "email": send_email(subject, body),
+    }

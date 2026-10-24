@@ -1,26 +1,69 @@
-from datetime import date, datetime
-from apscheduler.schedulers.background import BackgroundScheduler
-from . import db
-from .alerts import notify
 
+import logging
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+from apscheduler.schedulers.background import BackgroundScheduler
+
+from . import db
+from .notifications import notify
+
+logger = logging.getLogger(__name__)
+
+IST = ZoneInfo("Asia/Kolkata")
 REMIND_DAYS = {14, 7, 3, 1}
 
 
 def deadline_check():
-    for o in db.all_opportunities():
-        if not o["deadline"]:
+    today = datetime.now(IST).date()
+
+    for opportunity in db.all_opportunities():
+        deadline = opportunity.get("deadline")
+
+        if not deadline:
             continue
+
         try:
-            d = datetime.strptime(o["deadline"], "%Y-%m-%d").date()
-        except ValueError:
+            deadline_date = date.fromisoformat(deadline)
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid deadline for %s: %s",
+                opportunity.get("title"),
+                deadline,
+            )
             continue
-        left = (d - date.today()).days
-        if left in REMIND_DAYS:
-            notify(f"{left} day(s) left: {o['title']}", f"Deadline {o['deadline']}\n{o['url']}")
+
+        days_left = (deadline_date - today).days
+
+        if days_left not in REMIND_DAYS:
+            continue
+
+        title = opportunity.get("title") or "Opportunity"
+        url = opportunity.get("url") or ""
+
+        try:
+            result = notify(
+                f"{days_left} day(s) left: {title}",
+                f"Deadline: {deadline}\n{url}",
+            )
+            logger.info("Reminder result for %s: %s", title, result)
+        except Exception:
+            logger.exception("Reminder failed for %s", title)
 
 
 def start():
-    s = BackgroundScheduler()
-    s.add_job(deadline_check, "cron", hour=9)
-    s.start()
-    return s
+    scheduler = BackgroundScheduler(timezone=IST)
+
+    scheduler.add_job(
+        deadline_check,
+        trigger="cron",
+        hour=9,
+        minute=0,
+        id="deadline_check",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    scheduler.start()
+    return scheduler
