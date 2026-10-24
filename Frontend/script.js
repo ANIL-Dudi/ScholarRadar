@@ -276,13 +276,13 @@ function renderOpportunities() {
     var dueDetail;
 
     if (item.left === null) {
-      dueText = "Unknown";
-      dueDetail = "Verify deadline";
+      dueText = "Not stated";
+      dueDetail = "Rolling or not listed";
     } else if (item.closed) {
       dueText = "Past deadline";
       dueDetail = "Ended " + item.due;
     } else {
-      dueText = item.left === 0 ? "Today" : item.left + " days";
+      dueText = item.left === 0 ? "Today" : item.left === 1 ? "Tomorrow" : item.left + " days";
       dueDetail = "Deadline: " + item.due;
     }
 
@@ -309,6 +309,7 @@ function renderOpportunities() {
         '<button class="more" type="button" aria-expanded="false">' +
           'Documents and link' +
         '</button>' +
+        '<button class="remind" type="button" aria-pressed="false">Remind me</button>' +
       '</div>' +
 
       '<div class="due' +
@@ -335,6 +336,7 @@ function renderOpportunities() {
           : '<p>Source link unavailable. Verify independently.</p>') +
       '</div>';
 
+    wireReminder(card.querySelector(".remind"), item);
     var moreButton = card.querySelector(".more");
 
     moreButton.addEventListener("click", function () {
@@ -472,7 +474,7 @@ async function scanOpportunities() {
   var usingDemo = false;
   var demoReason = "";
 
-  setStatus("Searching for opportunities...");
+  setStatus("Searching the live web with TinyFish (30-90 seconds)...");
 
   opportunities = [];
 
@@ -489,7 +491,7 @@ async function scanOpportunities() {
     var results;
 
     if (API) {
-      var endpoint = API + "/api/opportunities?interests=" +
+      var endpoint = API + "/api/opportunities?refresh=true&interests=" +
         encodeURIComponent(interests);
 
       try {
@@ -582,7 +584,246 @@ function setupTheme() {
 // Initialization
 // ============================================================
 
+// ============================================================
+// Email deadline alerts
+// ============================================================
+
+function setupAlerts() {
+  var header = document.querySelector("#feed .fh");
+  if (!header || !API) return;
+
+  var bar = document.createElement("div");
+  bar.className = "alertbar";
+
+  var button = document.createElement("button");
+  button.type = "button";
+  button.className = "alertbtn";
+  button.textContent = "Email my reminders now";
+
+  var message = document.createElement("span");
+  message.className = "alertmsg";
+  message.setAttribute("role", "status");
+  message.textContent =
+    "Reminders are also sent automatically at 9:00 AM IST, " +
+    "14, 7, 3 and 1 days before a deadline.";
+
+  button.addEventListener("click", async function () {
+    button.disabled = true;
+    message.textContent = "Sending...";
+
+    try {
+      var response = await fetch(API + "/api/alerts/digest?days=30", {
+        method: "POST"
+      });
+
+      if (!response.ok) throw new Error("HTTP " + response.status);
+
+      var result = await response.json();
+
+      if (result.sent) {
+        message.textContent =
+          "Email sent with " + result.count +
+          " upcoming deadline(s). Check your inbox.";
+      } else if (result.count === 0) {
+        message.textContent =
+          result.reason || "No upcoming deadlines in the next 30 days.";
+      } else {
+        message.textContent =
+          "Could not send. Check the email settings in Backend/.env.";
+      }
+    } catch (error) {
+      console.error("Alert request failed:", error);
+      message.textContent =
+        "Could not reach the backend (" + error.message + ").";
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  bar.appendChild(button);
+  bar.appendChild(message);
+  header.appendChild(bar);
+}
+
+// ============================================================
+// Per-opportunity email reminders
+// ============================================================
+
+var reminders = {};
+
+function paintReminder(button, on) {
+  button.setAttribute("aria-pressed", String(on));
+  button.textContent = on ? "Reminder on \u2713" : "Remind me";
+  button.title = on
+    ? "You will be emailed 14, 7, 3 and 1 days before the deadline. Click to turn off."
+    : "Email me before this deadline";
+}
+
+async function loadReminders() {
+  if (!API) return;
+
+  try {
+    var response = await fetch(API + "/api/reminders");
+    if (!response.ok) throw new Error("HTTP " + response.status);
+
+    var rows = await response.json();
+    reminders = {};
+    rows.forEach(function (row) { reminders[row.url] = true; });
+
+    document.querySelectorAll("button.remind[data-url]").forEach(function (button) {
+      paintReminder(button, !!reminders[button.getAttribute("data-url")]);
+    });
+  } catch (error) {
+    console.warn("Could not load reminders:", error);
+  }
+}
+
+function wireReminder(button, item) {
+  if (!button) return;
+
+  var url = safeUrl(item.url);
+
+  if (!API) {
+    button.disabled = true;
+    button.textContent = "Alerts need the backend";
+    return;
+  }
+  if (item.left === null) {
+    button.disabled = true;
+    button.textContent = "No deadline to track";
+    return;
+  }
+  if (item.closed) {
+    button.disabled = true;
+    button.textContent = "Deadline passed";
+    return;
+  }
+  if (!url) {
+    button.disabled = true;
+    button.textContent = "No source link";
+    return;
+  }
+
+  button.setAttribute("data-url", url);
+  paintReminder(button, !!reminders[url]);
+
+  button.addEventListener("click", async function () {
+    var turnOn = button.getAttribute("aria-pressed") !== "true";
+    button.disabled = true;
+    button.textContent = turnOn ? "Saving..." : "Removing...";
+
+    try {
+      var response = turnOn
+        ? await fetch(API + "/api/reminders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url: url,
+              title: item.title || "",
+              deadline: item.due
+            })
+          })
+        : await fetch(API + "/api/reminders?url=" + encodeURIComponent(url), {
+            method: "DELETE"
+          });
+
+      if (!response.ok) throw new Error("HTTP " + response.status);
+
+      if (turnOn) { reminders[url] = true; } else { delete reminders[url]; }
+      paintReminder(button, turnOn);
+    } catch (error) {
+      console.error("Reminder request failed:", error);
+      paintReminder(button, !turnOn);
+      button.textContent = "Could not save. Try again";
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+// ============================================================
+// Find new opportunities (TinyFish search + deadline extraction)
+// ============================================================
+
+function setupFinder() {
+  var header = document.querySelector("#feed .fh");
+  if (!header || !API) return;
+
+  var bar = document.createElement("div");
+  bar.className = "findbar";
+
+  var button = document.createElement("button");
+  button.type = "button";
+  button.className = "findbtn";
+  button.textContent = "Find new opportunities";
+
+  var message = document.createElement("span");
+  message.className = "findmsg";
+  message.setAttribute("role", "status");
+  message.textContent =
+    "Searches the web with TinyFish and reads each page for its deadline. " +
+    "This takes a few minutes and uses TinyFish credits.";
+
+  function poll() {
+    fetch(API + "/api/discover/status")
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s.running) {
+          message.textContent =
+            "Searching... " + s.queries_done + " of " + s.total +
+            " searches done, " + s.added + " saved so far.";
+          window.setTimeout(poll, 5000);
+          return;
+        }
+
+        button.disabled = false;
+        message.textContent = (s.error && !s.added)
+          ? "Search failed: " + s.error
+          : "Done. " + s.added + " opportunities saved. Updating the feed...";
+        scanOpportunities();
+      })
+      .catch(function (error) {
+        button.disabled = false;
+        message.textContent = "Lost contact with the backend (" + error.message + ").";
+      });
+  }
+
+  button.addEventListener("click", async function () {
+    button.disabled = true;
+    message.textContent = "Starting...";
+
+    var picked = Object.keys(selectedInterests)
+      .filter(function (key) { return selectedInterests[key]; })
+      .join(",");
+
+    try {
+      var response = await fetch(
+        API + "/api/discover/live?interests=" + encodeURIComponent(picked),
+        { method: "POST" }
+      );
+      if (!response.ok) throw new Error("HTTP " + response.status);
+
+      var result = await response.json();
+      if (!result.started) {
+        message.textContent = result.reason || "Could not start the search.";
+      }
+      poll();
+    } catch (error) {
+      console.error("Could not start discovery:", error);
+      button.disabled = false;
+      message.textContent = "Could not start the search (" + error.message + ").";
+    }
+  });
+
+  bar.appendChild(button);
+  bar.appendChild(message);
+  header.appendChild(bar);
+}
+
 function initScholarRadar() {
+  setupAlerts();
+  loadReminders();
+  setupFinder();
   renderInterests();
   setupCVUpload();
   setupTheme();

@@ -114,3 +114,51 @@ def all_opportunities():
         ).fetchall()
 
     return [dict(row) for row in rows]
+
+
+REMINDERS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS reminders (
+    url TEXT PRIMARY KEY,
+    title TEXT,
+    deadline TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+
+def add_reminder(url: str, title: str, deadline: str):
+    with conn() as connection:
+        connection.execute(REMINDERS_SCHEMA)
+        connection.execute(
+            """
+            INSERT INTO reminders (url, title, deadline)
+            VALUES (?, ?, ?)
+            ON CONFLICT(url) DO UPDATE SET
+                title = excluded.title,
+                deadline = excluded.deadline
+            """,
+            (url, title, deadline),
+        )
+
+
+def remove_reminder(url: str):
+    with conn() as connection:
+        connection.execute(REMINDERS_SCHEMA)
+        connection.execute("DELETE FROM reminders WHERE url = ?", (url,))
+
+
+def all_reminders() -> list:
+    with conn() as connection:
+        connection.execute(REMINDERS_SCHEMA)
+        rows = connection.execute(
+            """
+            SELECT r.url AS url,
+                   COALESCE(o.title, r.title) AS title,
+                   COALESCE(o.deadline, r.deadline) AS deadline
+            FROM reminders r
+            LEFT JOIN opportunities o ON o.url = r.url
+            ORDER BY 3
+            """
+        ).fetchall()
+
+    return [dict(row) for row in rows]

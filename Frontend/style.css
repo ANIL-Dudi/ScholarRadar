@@ -569,3 +569,97 @@ footer {
   color: #1b1200;
   font-weight: 600;
 }
+
+.alertbar {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.alertbtn {
+  border: 0;
+  background: var(--teal);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  border-radius: 12px;
+  padding: 10px 18px;
+  cursor: pointer;
+}
+
+.alertbtn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.alertbtn:focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.alertmsg {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.card button.remind {
+  margin: 12px 0 0 16px;
+  background: none;
+  border: 1px solid var(--teal);
+  color: var(--teal);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: 999px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.card button.remind[aria-pressed="true"] {
+  background: var(--teal);
+  color: #fff;
+}
+
+.card button.remind:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.findbar {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.findbtn {
+  border: 0;
+  background: var(--amber);
+  color: #1b1200;
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  border-radius: 12px;
+  padding: 10px 18px;
+  cursor: pointer;
+}
+
+.findbtn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.findbtn:focus-visible {
+  outline: 3px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.findmsg {
+  color: var(--muted);
+  font-size: 14px;
+}

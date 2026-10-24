@@ -3,6 +3,8 @@ import asyncio
 import json
 import logging
 import re
+import time
+from datetime import date
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -12,6 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from . import db, extract, matcher, scheduler, tinyfish
 from .cv import cv_to_text
+from .explain import assess_many
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -110,8 +113,35 @@ async def upload_profile(
         await cv.close()
 
 
-async def run_discovery(query: str) -> dict:
-    search_results = (await tinyfish.search(query))[:5]
+def build_queries(chosen: list[str]) -> list[str]:
+    """One broad query plus topic-specific queries for each chosen interest."""
+    queries = [DEFAULT_QUERY]
+    for key in chosen:
+        topic = INTEREST_WORDS[key][0]
+        queries.append(f"{topic} research internship 2027 undergraduate students India")
+        queries.append(f"{topic} scholarship fellowship 2027 students India")
+    queries.append("summer research internship 2027 applications open IIT IISc IISER undergraduate")
+    queries.append("fellowship for Indian undergraduate students 2027 apply deadline")
+    return queries[:7]
+
+
+async def run_discovery(query, per_query: int = 5) -> dict:
+    queries = [query] if isinstance(query, str) else list(query)
+    batches = await asyncio.gather(
+        *(tinyfish.search(q) for q in queries), return_exceptions=True
+    )
+
+    search_results = []
+    errors = []
+    for q, batch in zip(queries, batches):
+        if isinstance(batch, Exception):
+            logger.warning("TinyFish search failed for %r: %s", q, batch)
+            errors.append(batch)
+            continue
+        search_results.extend(batch[:per_query])
+
+    if errors and not search_results:
+        raise errors[0]
 
     urls = list(dict.fromkeys(
         result["url"]
@@ -145,6 +175,12 @@ async def run_discovery(query: str) -> dict:
 
         host = urlparse(url).netloc.lower().removeprefix("www.")
         if any(host == h or host.endswith("." + h) for h in skip_hosts):
+            continue
+
+        # Skip job boards and company career portals (full-time jobs, not student programmes).
+        if host.startswith(("careers.", "jobs.")) or any(
+            word in host for word in ("glassdoor.", "indeed.", "greenhouse.io", "lever.co", "workday")
+        ):
             continue
 
         candidates.append((url, page_text))
@@ -227,9 +263,17 @@ async def opportunities(
 ):
     rows = db.all_opportunities()
 
-    if refresh or not rows:
+    chosen = [
+        key for key in interests.split(",")
+        if key in INTEREST_WORDS
+    ]
+
+    recently_searched = (time.time() - STATE.get("last_discovery", 0)) < 600
+
+    if (refresh and not recently_searched) or not rows:
         try:
-            result = await run_discovery(DEFAULT_QUERY)
+            STATE["last_discovery"] = time.time()
+            result = await run_discovery(build_queries(chosen))
             logger.info("Discovery result: %s", result)
         except Exception:
             logger.exception("Automatic discovery failed")
@@ -267,10 +311,34 @@ async def opportunities(
         )
 
     # Keep opportunities even if their deadline is not stated.
-    ranked = await asyncio.to_thread(matcher.rank, profile_text, rows, 12)
+    ranked = await asyncio.to_thread(matcher.rank, profile_text, rows, 30)
 
     if not ranked:
         return []
+
+    # Drop expired / old-edition items first so LLM calls are only spent on live ones.
+    today = date.today().isoformat()
+    ranked = [
+        o for o in ranked
+        if not (o.get("deadline") and o["deadline"] < today)
+        and not (
+            not o.get("deadline")
+            and any(y in (o.get("title") or "") for y in ("2024", "2025", "2026"))
+        )
+    ][:12]
+
+    if not ranked:
+        return []
+
+    # LLM eligibility check against the CV; items clearly not open to this student are dropped.
+    verdicts = await assess_many(profile_text, ranked)
+    kept = [
+        (o, v) for o, v in zip(ranked, verdicts)
+        if not (v and v.get("fit") == "not_eligible")
+    ]
+    if kept:  # if everything was rejected, show all rather than an empty feed
+        ranked = [o for o, _ in kept]
+        verdicts = [v for _, v in kept]
 
     scores = [item["score"] for item in ranked]
     low_score = min(scores)
@@ -299,6 +367,13 @@ async def opportunities(
         url = opportunity.get("url") or ""
         organization = urlparse(url).netloc.replace("www.", "")
 
+        due = opportunity.get("deadline")
+        title_text = opportunity.get("title") or ""
+        if due and due < date.today().isoformat():
+            continue  # deadline already passed
+        if not due and any(year in title_text for year in ("2024", "2025", "2026")):
+            continue  # old edition with no future deadline
+
         output.append({
             "id": index,
             "title": opportunity.get("title") or "Untitled opportunity",
@@ -316,4 +391,101 @@ async def opportunities(
             "url": url,
         })
 
-    return output
+    return output[:12]
+
+@app.post("/api/alerts/digest")
+def alerts_digest(days: int = 30):
+    """Email/Telegram a digest of deadlines in the next `days` days."""
+    return scheduler.send_digest(days)
+
+
+from fastapi import BackgroundTasks
+from pydantic import BaseModel
+
+
+class ReminderIn(BaseModel):
+    url: str
+    title: str = ""
+    deadline: str
+
+
+@app.get("/api/reminders")
+def list_reminders():
+    return db.all_reminders()
+
+
+@app.post("/api/reminders")
+def create_reminder(reminder: ReminderIn, background: BackgroundTasks):
+    from datetime import date
+
+    try:
+        due = date.fromisoformat(reminder.deadline)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Deadline must be YYYY-MM-DD.")
+
+    if not reminder.url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="A valid opportunity URL is required.")
+
+    db.add_reminder(reminder.url, reminder.title[:300], due.isoformat())
+
+    background.add_task(
+        scheduler.notify,
+        "Reminder set: " + (reminder.title or "Opportunity"),
+        "ScholarRadar will email you 14, 7, 3 and 1 days before the deadline ("
+        + due.isoformat() + ").\n" + reminder.url,
+    )
+    return {"ok": True, "deadline": due.isoformat()}
+
+
+@app.delete("/api/reminders")
+def delete_reminder(url: str):
+    db.remove_reminder(url)
+    return {"ok": True}
+
+
+from fastapi import BackgroundTasks
+
+DISCOVERY = {"running": False, "added": 0, "queries_done": 0, "total": 0, "error": None}
+
+LIVE_QUERIES = [
+    "research internship 2027 application deadline undergraduate India",
+    "summer research fellowship 2027 last date to apply Indian students",
+]
+
+
+async def _discover_all(queries):
+    try:
+        for query in queries:
+            try:
+                result = await run_discovery(query)
+                DISCOVERY["added"] += result.get("added", 0)
+            except Exception as exc:
+                logger.exception("Live discovery failed for %s", query)
+                DISCOVERY["error"] = str(exc)[:200]
+            DISCOVERY["queries_done"] += 1
+    finally:
+        DISCOVERY["running"] = False
+
+
+@app.post("/api/discover/live")
+async def discover_live(background: BackgroundTasks, interests: str = ""):
+    if DISCOVERY["running"]:
+        return {"started": False, "reason": "A search is already running."}
+
+    queries = list(LIVE_QUERIES)
+    chosen = [k for k in interests.split(",") if k in INTEREST_WORDS]
+    if chosen:
+        queries.append(
+            INTEREST_WORDS[chosen[0]][0] + " internship 2027 application deadline India"
+        )
+
+    DISCOVERY.update(
+        running=True, added=0, queries_done=0, total=len(queries), error=None
+    )
+    background.add_task(_discover_all, queries)
+    return {"started": True, "queries": len(queries)}
+
+
+@app.get("/api/discover/status")
+def discover_status():
+    return DISCOVERY
