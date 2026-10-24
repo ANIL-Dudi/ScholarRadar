@@ -9,4 +9,5 @@ sentence-transformers
 rank-bm25
 numpy
 apscheduler
-anthropic
+tinyfish
+tzdata

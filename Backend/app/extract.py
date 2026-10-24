@@ -1,82 +1,59 @@
-
 import json
 import logging
 import re
+from datetime import date
 
-import anthropic
+from tinyfish import RunStatus, TinyFish
 
-from .config import ANTHROPIC_API_KEY, LLM_MODEL
+from .config import TINYFISH_API_KEY
 
 logger = logging.getLogger(__name__)
 
-PROMPT = """
-Extract opportunity details from the supplied webpage text.
-Return ONLY a valid JSON object with these fields:
-{
-  "title": "string",
-  "deadline": "YYYY-MM-DD or null",
-  "eligibility": "string",
-  "documents": ["string"],
-  "funding": "string or null",
-  "summary": "one-sentence summary"
-}
-
-Rules:
-- Never invent a deadline, eligibility condition, or funding amount.
-- Use null for an unstated deadline or funding.
-- Use an empty list if documents are not specified.
-- Do not treat the current date as the deadline.
-"""
+GOAL = """Read this page about a research internship, scholarship or programme.
+Extract the main opportunity described and return ONLY a JSON object with exactly these keys:
+- "title": string
+- "deadline": the application deadline as YYYY-MM-DD, or null if the page does not state one
+- "eligibility": short string describing who can apply
+- "documents": list of strings naming required application documents, or an empty list if not stated
+- "funding": string describing stipend or funding, or null if not stated
+- "summary": one sentence describing the opportunity
+Never invent a deadline or funding amount. If the page is not about a specific opportunity,
+return {"title": null}."""
 
 
-def extract(url: str, text: str) -> dict:
-    if not ANTHROPIC_API_KEY:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY is missing. Check Backend/.env"
-        )
+def _as_dict(value) -> dict:
+    if isinstance(value, str):
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", value.strip())
+        value = json.loads(cleaned)
+    if isinstance(value, dict) and "title" not in value:
+        for inner in value.values():
+            if isinstance(inner, dict) and "title" in inner:
+                return inner
+    if not isinstance(value, dict):
+        raise ValueError("TinyFish did not return a JSON object.")
+    return value
 
-    if not text or not text.strip():
-        raise ValueError("Cannot extract an opportunity from empty text.")
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+def extract(url: str, text: str = "") -> dict:
+    if not TINYFISH_API_KEY:
+        raise RuntimeError("TINYFISH_API_KEY is missing. Check Backend/.env")
 
-    response = client.messages.create(
-        model=LLM_MODEL,
-        max_tokens=1200,
-        system=PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Source URL: {url}\n\nPage text:\n{text[:15000]}",
-            }
-        ],
-    )
+    client = TinyFish()
+    run = client.agent.run(url=url, goal=GOAL)
 
-    raw = "".join(
-        block.text
-        for block in response.content
-        if getattr(block, "type", None) == "text"
-    ).strip()
+    if run.status != RunStatus.COMPLETED:
+        raise ValueError(f"TinyFish run did not complete ({run.status}).")
 
-    # Accommodate models that wrap JSON in a Markdown code fence.
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
+    data = _as_dict(run.result)
 
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        logger.error("LLM returned invalid JSON for %s", url)
-        raise ValueError("Opportunity extraction returned invalid JSON.") from exc
-
-    if not isinstance(data, dict):
-        raise ValueError("Opportunity extraction did not return an object.")
+    if not data.get("title"):
+        raise ValueError("No specific opportunity found on this page.")
 
     deadline = data.get("deadline")
     if deadline is not None:
         try:
-            from datetime import date
-            date.fromisoformat(deadline)
-        except (ValueError, TypeError):
+            deadline = date.fromisoformat(str(deadline)).isoformat()
+        except ValueError:
             deadline = None
 
     documents = data.get("documents")
@@ -85,10 +62,10 @@ def extract(url: str, text: str) -> dict:
 
     return {
         "url": url,
-        "title": str(data.get("title") or "Untitled opportunity"),
+        "title": str(data.get("title")),
         "deadline": deadline,
         "eligibility": str(data.get("eligibility") or "Not stated"),
-        "documents": documents,
+        "documents": [str(d) for d in documents],
         "funding": data.get("funding"),
         "summary": str(data.get("summary") or ""),
     }

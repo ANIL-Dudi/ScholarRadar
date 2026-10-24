@@ -91,6 +91,8 @@ async def upload_profile(
 ):
     try:
         data = await cv.read()
+        if len(data) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="CV must be 5 MB or smaller.")
         text = cv_to_text(data, cv.filename or "")
 
         STATE["profile"] = f"{interests}\n{text}".strip()
@@ -128,9 +130,12 @@ async def run_discovery(query: str) -> dict:
             "Unexpected TinyFish Fetch response: results is not a list"
         )
 
-    added = 0
-    processed = 0
+    skip_hosts = (
+        "instagram.com", "facebook.com", "youtube.com",
+        "tiktok.com", "x.com", "twitter.com", "linkedin.com",
+    )
 
+    candidates = []
     for page in pages:
         url = page.get("url")
         page_text = page.get("text") or page.get("content") or ""
@@ -138,16 +143,29 @@ async def run_discovery(query: str) -> dict:
         if not url or not page_text.strip():
             continue
 
-        processed += 1
+        host = urlparse(url).netloc.lower().removeprefix("www.")
+        if any(host == h or host.endswith("." + h) for h in skip_hosts):
+            continue
 
-        try:
-            opportunity = await asyncio.to_thread(
-                extract.extract, url, page_text
-            )
-            db.upsert_opportunity(opportunity, page_text)
-            added += 1
-        except Exception:
-            logger.exception("Opportunity extraction failed for %s", url)
+        candidates.append((url, page_text))
+
+    processed = len(candidates)
+    gate = asyncio.Semaphore(3)
+
+    async def work(url, page_text):
+        async with gate:
+            try:
+                opportunity = await asyncio.to_thread(
+                    extract.extract, url, page_text
+                )
+                db.upsert_opportunity(opportunity, page_text)
+                return 1
+            except Exception:
+                logger.exception("Opportunity extraction failed for %s", url)
+                return 0
+
+    results = await asyncio.gather(*(work(u, t) for u, t in candidates))
+    added = sum(results)
 
     return {
         "found": len(urls),
@@ -249,7 +267,7 @@ async def opportunities(
         )
 
     # Keep opportunities even if their deadline is not stated.
-    ranked = matcher.rank(profile_text, rows, top_k=12)
+    ranked = await asyncio.to_thread(matcher.rank, profile_text, rows, 12)
 
     if not ranked:
         return []

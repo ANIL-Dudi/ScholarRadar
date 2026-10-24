@@ -94,7 +94,9 @@ function $(id) {
 
 function setStatus(message) {
   var element = $("status");
-  if (element) element.textContent = message;
+  if (!element) return;
+  element.textContent = message;
+  element.classList.toggle("warn", /^SAMPLE DATA/.test(message));
 }
 
 function setHint(message) {
@@ -487,7 +489,7 @@ async function scanOpportunities() {
     var results;
 
     if (API) {
-      var endpoint = API + "/api/opportunities?refresh=true&interests=" +
+      var endpoint = API + "/api/opportunities?interests=" +
         encodeURIComponent(interests);
 
       try {
@@ -536,6 +538,13 @@ async function scanOpportunities() {
       );
     }
 
+    var note = $("note");
+    if (note) {
+      note.textContent = usingDemo
+        ? "Sample data is shown (" + (demoReason || "backend not configured") + ")."
+        : "Live results from the backend. Verify deadlines on official sites.";
+    }
+
     if (feed) {
       feed.scrollIntoView({
         behavior: "smooth",
@@ -563,9 +572,9 @@ function setupTheme() {
 
   button.addEventListener("click", function () {
     var root = document.documentElement;
-    var isDark = root.getAttribute("data-theme") === "dark";
-
-    root.setAttribute("data-theme", isDark ? "light" : "dark");
+    var current = root.getAttribute("data-theme") ||
+      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    root.setAttribute("data-theme", current === "dark" ? "light" : "dark");
   });
 }
 

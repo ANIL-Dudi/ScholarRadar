@@ -325,7 +325,10 @@ h1 {
   padding: 6px 14px;
   font-size: 13px;
   color: var(--muted);
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
+  width: max-content;
+  max-width: 92vw;
 }
 
 section.feed {
@@ -558,4 +561,11 @@ footer {
   .blip {
     transition: none;
   }
+}
+
+.status.warn {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #1b1200;
+  font-weight: 600;
 }
