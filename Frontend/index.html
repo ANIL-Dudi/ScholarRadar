@@ -1,64 +1,221 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ScholarRadar</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+  <meta
+    name="description"
+    content="ScholarRadar helps students discover and rank research internships, scholarships, and programmes based on their interests and CV."
+  >
+  <meta name="theme-color" content="#f6f8f7">
+
+  <title>ScholarRadar | Discover Opportunities</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Figtree:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  >
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-<div class="wrap">
-  <header>
-    <div class="brand"><i></i>ScholarRadar</div>
-    <button class="tbtn" id="theme" type="button">Switch theme</button>
-  </header>
+  <div class="wrap">
 
-  <div class="hero">
-    <div>
-      <h1>Never miss the opportunity that fits you.</h1>
-      <p class="lead">Upload your CV, pick what you care about, and get internships, programmes and scholarships ranked by fit, with deadlines and a document checklist.</p>
+    <!-- Header -->
+    <header>
+      <a
+        class="brand"
+        href="./index.html"
+        aria-label="ScholarRadar home"
+        style="text-decoration: none; color: inherit;"
+      >
+        <i aria-hidden="true"></i>
+        ScholarRadar
+      </a>
 
-      <label class="drop">
-        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--teal)"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-        <div><b id="fname">Upload your CV</b><span id="fhint">PDF or Word, up to 5 MB</span></div>
-        <input type="file" id="cv" accept=".pdf,.doc,.docx">
-      </label>
+      <button
+        class="tbtn"
+        id="theme"
+        type="button"
+        aria-label="Switch colour theme"
+      >
+        Switch theme
+      </button>
+    </header>
 
-      <div class="label">Your interests</div>
-      <div class="chips" id="chips"></div>
+    <!-- Hero section -->
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
 
-      <button class="go" id="scan" type="button">Scan for opportunities</button>
-    </div>
+        <div class="hero-content">
+          <h1 id="hero-title">
+            Never miss the opportunity that fits you.
+          </h1>
 
-    <div class="radar idle" id="radar" aria-label="Radar showing matched opportunities">
-      <svg viewBox="0 0 100 100" aria-hidden="true">
-        <g fill="none" stroke="#2BB5C0" stroke-opacity=".45" stroke-width=".35">
-          <circle cx="50" cy="50" r="48"/><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="20"/><circle cx="50" cy="50" r="7"/>
-          <path d="M50 2v96M2 50h96"/>
-        </g>
-      </svg>
-      <div class="sweep"></div>
-      <div id="blips"></div>
-      <div class="status" id="status">Ready to scan</div>
-    </div>
+          <p class="lead">
+            Upload your CV, pick what you care about, and get internships,
+            programmes and scholarships ranked by fit, with deadlines and
+            a document checklist.
+          </p>
+
+          <!-- CV upload -->
+          <label class="drop" for="cv">
+            <svg
+              width="34"
+              height="34"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="color: var(--teal);"
+              aria-hidden="true"
+            >
+              <path d="M12 16V4m0 0L7 9m5-5 5 5"/>
+              <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>
+            </svg>
+
+            <div>
+              <b id="fname">Upload your CV</b>
+              <span id="fhint">PDF or TXT, up to 5 MB</span>
+            </div>
+
+            <input
+              type="file"
+              id="cv"
+              name="cv"
+              accept=".pdf,.txt,application/pdf,text/plain"
+              aria-label="Choose your CV file"
+            >
+          </label>
+
+          <!-- Interests -->
+          <div class="label" id="interests-label">
+            Your interests
+          </div>
+
+          <div
+            class="chips"
+            id="chips"
+            role="group"
+            aria-labelledby="interests-label"
+          ></div>
+
+          <!-- Scan button -->
+          <button
+            class="go"
+            id="scan"
+            type="button"
+          >
+            Scan for opportunities
+          </button>
+        </div>
+
+        <!-- Opportunity radar -->
+        <div
+          class="radar idle"
+          id="radar"
+          role="img"
+          aria-label="Radar showing matched opportunities"
+        >
+          <svg
+            viewBox="0 0 100 100"
+            aria-hidden="true"
+          >
+            <g
+              fill="none"
+              stroke="#2BB5C0"
+              stroke-opacity=".45"
+              stroke-width=".35"
+            >
+              <circle cx="50" cy="50" r="48"/>
+              <circle cx="50" cy="50" r="34"/>
+              <circle cx="50" cy="50" r="20"/>
+              <circle cx="50" cy="50" r="7"/>
+              <path d="M50 2v96M2 50h96"/>
+            </g>
+          </svg>
+
+          <div class="sweep" aria-hidden="true"></div>
+          <div id="blips" aria-hidden="true"></div>
+
+          <div
+            class="status"
+            id="status"
+            role="status"
+            aria-live="polite"
+          >
+            Ready to scan
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Ranked opportunities -->
+      <section
+        class="feed"
+        id="feed"
+        aria-labelledby="feed-title"
+      >
+        <div class="fh">
+          <h2 id="feed-title">Your ranked feed</h2>
+
+          <span class="note" id="note">
+            Sample data shown after a scan. Connect the FastAPI backend to go live.
+          </span>
+        </div>
+
+        <!-- JavaScript inserts opportunity cards here -->
+        <div id="list" aria-live="polite" aria-busy="false">
+          <div class="empty">
+            Nothing here yet. Pick your interests and press
+            <b>Scan for opportunities</b>.
+          </div>
+        </div>
+
+        <!-- User control and trust notice -->
+        <div class="guard">
+          <svg
+            width="26"
+            height="26"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+
+          <p>
+            <b>You stay in control.</b>
+            ScholarRadar never submits an application for you, and every
+            result should link to its source page. Always verify eligibility
+            and deadlines on the official website.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+      ScholarRadar · HackIIITD Round 1
+    </footer>
+
   </div>
 
-  <section class="feed" id="feed">
-    <div class="fh">
-      <h2>Your ranked feed</h2>
-      <span class="note" id="note">Sample data shown after a scan. Connect the FastAPI backend to go live.</span>
-    </div>
-    <div id="list"><div class="empty">Nothing here yet. Pick your interests and press <b>Scan for opportunities</b>.</div></div>
-    <div class="guard">
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>
-      <p><b>You stay in control.</b> ScholarRadar never submits an application for you, and every result links to its source page.</p>
-    </div>
-  </section>
-  <footer>ScholarRadar · HackIIITD Round 1</footer>
-</div>
-
-<script src="script.js"></script>
+  <!-- Application JavaScript -->
+  <script src="script.js" defer></script>
 </body>
 </html>

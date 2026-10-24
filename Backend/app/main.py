@@ -67,3 +67,57 @@ async def agent(url: str, goal: str):
         async for ev in tinyfish.agent_stream(url, goal):
             yield f"data: {json.dumps(ev)}\n\n"
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+# ---- Frontend adapter: shape results the way script.js expects ----
+import re
+from urllib.parse import urlparse
+
+INTEREST_WORDS = {
+    "ml": ["machine learning", "artificial intelligence", "deep learning", "data science", "computer vision", "neural"],
+    "bio": ["biology", "biotech", "biomedical", "life science", "medical", "genom"],
+    "physics": ["physics", "quantum", "astronomy", "astrophysics"],
+    "econ": ["economics", "finance", "econometrics"],
+    "oss": ["open source", "open-source", "software development", "github"],
+    "eng": ["engineering", "electronics", "robotics", "mechanical", "electrical", "computer science"],
+}
+DEFAULT_QUERY = "research internship 2027 undergraduate students India"
+
+
+def _tags(o: dict) -> list[str]:
+    text = f" {o.get('title','')} {o.get('summary','')} {o.get('eligibility','')} ".lower()
+    return [k for k, words in INTEREST_WORDS.items() if any(w in text for w in words)]
+
+
+@app.get("/api/opportunities")
+async def opportunities(interests: str = "", refresh: bool = False):
+    chosen = [k for k in interests.split(",") if k in INTEREST_WORDS]
+    if refresh or not db.all_opportunities():
+        await discover(query=DEFAULT_QUERY)
+    profile = STATE["profile"] + " " + " ".join(INTEREST_WORDS[k][0] for k in chosen)
+    rows = [o for o in db.all_opportunities()
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", o.get("deadline") or "")]
+    ranked = matcher.rank(profile, rows, top_k=12)
+    if not ranked:
+        return []
+    lo = min(o["score"] for o in ranked)
+    hi = max(o["score"] for o in ranked)
+    out = []
+    for i, o in enumerate(ranked, start=1):
+        base = 60 + round(30 * (o["score"] - lo) / (hi - lo)) if hi > lo else 80
+        try:
+            docs = json.loads(o.get("documents") or "[]")
+        except ValueError:
+            docs = []
+        out.append({
+            "id": i,
+            "title": o.get("title") or "Untitled opportunity",
+            "org": urlparse(o["url"]).netloc.replace("www.", ""),
+            "funding": o.get("funding") or "See source page",
+            "due": o["deadline"],
+            "base": base,
+            "tags": _tags(o),
+            "why": o.get("summary") or o["why"],
+            "docs": docs or ["See source page"],
+            "url": o["url"],
+        })
+    return out
