@@ -64,8 +64,8 @@ Every date shows how much to trust it:
 
 ```
 ScholarRadar/
-  backend/      FastAPI app: API, crawling, extraction, matcher, scheduler, alerts
-  frontend/     React dashboard: CV upload, interests, ranked feed, deadline calendar
+  backend/      Python ,SQLite,FastAPI app: API, crawling, extraction, matcher, scheduler, alerts
+  frontend/     HTML CSS Javascript dashboard: CV upload, interests, ranked feed, deadline calendar
   README.md
 ```
 
