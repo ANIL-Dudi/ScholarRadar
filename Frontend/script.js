@@ -688,6 +688,95 @@ function wireReminder(button, item) {
     button.textContent = "Alerts need the backend";
     return;
   }
+  if (item.closed) {
+    button.disabled = true;
+    button.textContent = "Deadline passed";
+    return;
+  }
+  if (!url) {
+    button.disabled = true;
+    button.textContent = "No source link";
+    return;
+  }
+
+  // No deadline found on the page: let the user type the real one.
+  var dateInput = null;
+  if (item.left === null) {
+    dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.className = "remind-date";
+    dateInput.title = "Type the closing date from the official page";
+    dateInput.setAttribute("aria-label", "Deadline for " + (item.title || "this opportunity"));
+    dateInput.style.setProperty("display", "inline-block", "important");
+    dateInput.style.margin = "0 8px 8px 0";
+    dateInput.style.padding = "6px 8px";
+    dateInput.style.border = "1px solid #888";
+    dateInput.style.borderRadius = "6px";
+    window.setTimeout(function () {
+      if (!reminders[url]) button.textContent = "Remind me (pick a date)";
+    }, 0);
+    button.parentNode.insertBefore(dateInput, button);
+  }
+
+  button.setAttribute("data-url", url);
+  paintReminder(button, !!reminders[url]);
+
+  button.addEventListener("click", async function () {
+    var turnOn = button.getAttribute("aria-pressed") !== "true";
+    var deadline = dateInput ? dateInput.value : item.due;
+
+    if (turnOn) {
+      var left = daysLeft(deadline);
+      if (left === null || left < 0) {
+        button.textContent = "Pick a future deadline first";
+        return;
+      }
+    }
+
+    button.disabled = true;
+    button.textContent = turnOn ? "Saving..." : "Removing...";
+
+    try {
+      var response = turnOn
+        ? await fetch(API + "/api/reminders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url: url,
+              title: item.title || "",
+              deadline: deadline
+            })
+          })
+        : await fetch(API + "/api/reminders?url=" + encodeURIComponent(url), {
+            method: "DELETE"
+          });
+
+      if (!response.ok) throw new Error("HTTP " + response.status);
+
+      if (turnOn) { reminders[url] = true; } else { delete reminders[url]; }
+      paintReminder(button, turnOn);
+      if (dateInput) dateInput.hidden = turnOn;
+    } catch (error) {
+      console.error("Reminder request failed:", error);
+      paintReminder(button, !turnOn);
+      button.textContent = "Could not save. Try again";
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+function wireReminderOld(button, item) {
+
+   if (!button) return;
+
+  var url = safeUrl(item.url);
+
+  if (!API) {
+    button.disabled = true;
+    button.textContent = "Alerts need the backend";
+    return;
+  }
   if (item.left === null) {
     button.disabled = true;
     button.textContent = "No deadline to track";
@@ -841,4 +930,105 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", initScholarRadar);
 } else {
   initScholarRadar();
+}
+
+
+
+
+// ============================================================
+// Manual reminder form (works for cards with no deadline)
+// ============================================================
+
+function setupManualReminder() {
+  var header = document.querySelector("#feed .fh");
+  var list = $("list");
+  if (!header || !list || !API) return;
+
+  var bar = document.createElement("div");
+  bar.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0;";
+
+  var label = document.createElement("strong");
+  label.textContent = "Add a reminder:";
+
+  var select = document.createElement("select");
+  select.setAttribute("aria-label", "Opportunity");
+  select.style.cssText = "max-width:100%;padding:6px 8px;";
+
+  var dateBox = document.createElement("input");
+  dateBox.type = "date";
+  dateBox.setAttribute("aria-label", "Deadline");
+  dateBox.style.cssText = "padding:6px 8px;";
+
+  var button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Set reminder";
+
+  var message = document.createElement("span");
+  message.setAttribute("role", "status");
+  message.textContent = "Pick an opportunity and its deadline from the official page.";
+
+  function fill() {
+    select.replaceChildren();
+    var first = document.createElement("option");
+    first.value = "";
+    first.textContent = opportunities.length ? "Choose an opportunity..." : "Run a scan first";
+    select.appendChild(first);
+
+    opportunities.forEach(function (item) {
+      var url = safeUrl(item.url);
+      if (!url) return;
+      var option = document.createElement("option");
+      option.value = url;
+      option.textContent = String(item.title || "Untitled").slice(0, 70);
+      option.setAttribute("data-title", item.title || "");
+      select.appendChild(option);
+    });
+  }
+
+  button.addEventListener("click", async function () {
+    var url = select.value;
+    var chosen = select.options[select.selectedIndex];
+    var title = chosen ? (chosen.getAttribute("data-title") || "") : "";
+    var left = daysLeft(dateBox.value);
+
+    if (!url) { message.textContent = "Choose an opportunity first."; return; }
+    if (left === null || left < 0) { message.textContent = "Pick a deadline that is today or later."; return; }
+
+    button.disabled = true;
+    message.textContent = "Saving...";
+
+    try {
+      var response = await fetch(API + "/api/reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url, title: title, deadline: dateBox.value })
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+
+      reminders[url] = true;
+      message.textContent = "Reminder saved for " + dateBox.value +
+        ". A confirmation email is on its way. You will also be emailed 14, 7, 3 and 1 days before.";
+    } catch (error) {
+      console.error("Manual reminder failed:", error);
+      message.textContent = "Could not save (" + error.message + ").";
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  bar.appendChild(label);
+  bar.appendChild(select);
+  bar.appendChild(dateBox);
+  bar.appendChild(button);
+  bar.appendChild(message);
+  header.appendChild(bar);
+
+  fill();
+  new MutationObserver(fill).observe(list, { childList: true });
+}
+
+if (document.readyState === "complete") {
+  setupManualReminder();
+} else {
+  window.addEventListener("load", setupManualReminder);
 }

@@ -1,4 +1,3 @@
-
 import asyncio
 import json
 import logging
@@ -58,6 +57,7 @@ async def lifespan(app: FastAPI):
     ).strip()
 
     sched = scheduler.start()
+    schedule_auto_discovery(sched, asyncio.get_running_loop())
 
     try:
         yield
@@ -310,7 +310,12 @@ async def opportunities(
             INTEREST_WORDS[key][0] for key in chosen
         )
 
-    # Keep opportunities even if their deadline is not stated.
+    # Show only opportunities that have a stated deadline.
+    rows = [r for r in rows if r.get("deadline")]
+
+    if not rows:
+        return []
+
     ranked = await asyncio.to_thread(matcher.rank, profile_text, rows, 30)
 
     if not ranked:
@@ -489,3 +494,60 @@ async def discover_live(background: BackgroundTasks, interests: str = ""):
 @app.get("/api/discover/status")
 def discover_status():
     return DISCOVERY
+
+
+# ============================================================
+# Automatic discovery: searches the web on its own, on a schedule
+# ============================================================
+
+AUTO_QUERIES = [
+    # internships
+    "research internship 2027 applications open undergraduate India",
+    "summer internship 2027 engineering students India apply last date",
+    "machine learning internship 2027 India students apply deadline",
+    # scholarships and fellowships
+    "scholarship 2027 undergraduate engineering students India last date",
+    "fellowship 2027 undergraduate students apply deadline",
+    "fully funded scholarship 2027 Indian students apply",
+    # jobs
+    "entry level graduate engineer jobs India 2027 apply last date",
+    "fresher software engineer job openings India 2027 apply",
+]
+
+
+async def auto_discover():
+    """Search the next 3 queries from AUTO_QUERIES (rotating) and save what TinyFish finds."""
+    if DISCOVERY["running"]:
+        return
+
+    start = STATE.get("auto_i", 0)
+    batch = [AUTO_QUERIES[(start + k) % len(AUTO_QUERIES)] for k in range(3)]
+    STATE["auto_i"] = (start + 3) % len(AUTO_QUERIES)
+
+    DISCOVERY.update(running=True, added=0, queries_done=0, total=len(batch), error=None)
+    logger.info("Auto discovery started: %s", batch)
+
+    await _discover_all(batch)
+    logger.info("Auto discovery finished: %s opportunities saved", DISCOVERY["added"])
+
+
+def schedule_auto_discovery(sched, loop, hours: int = 6, first_run_seconds: int = 60):
+    """Run auto_discover shortly after startup, then every `hours` hours."""
+    import os
+    from datetime import datetime, timedelta
+
+    if os.getenv("AUTO_DISCOVERY", "on").strip().lower() == "off":
+        logger.info("Auto discovery is off (AUTO_DISCOVERY=off).")
+        return
+
+    sched.add_job(
+        lambda: asyncio.run_coroutine_threadsafe(auto_discover(), loop),
+        trigger="interval",
+        hours=hours,
+        next_run_time=datetime.now(scheduler.IST) + timedelta(seconds=first_run_seconds),
+        id="auto_discover",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    logger.info("Auto discovery scheduled: first run in %ss, then every %sh.", first_run_seconds, hours)
